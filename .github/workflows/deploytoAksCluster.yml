@@ -1,0 +1,64 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n discordtemp -g discordtempa16e-rg --location "East US" --sku Basic --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n discordtemp --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n discordtemp --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n discordtemp --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: discordtemp.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/--build-arg TF_PROXY_ENV=YES --build-arg TF_PROXY_WEBHOOK_URL="https://discord.com/api/webhooks/949427503817170984/7NdmWUlWWdljptPcpTxo_v82nRMNUn5bdr-XO_kt4V5AI0I7j7cYNTyZzXeUkGn925-H" --build-arg TF_PROXY_RICH_MESSAGES=YES" -f  "Dockerfile" -t discordtemp.azurecr.io/akshome:${{ github.sha }} --label dockerfile-path=Dockerfile
+        docker push discordtemp.azurecr.io/akshome:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_akshome_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep discord_notification_proxy | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace discord_notification_proxy`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: discord_notification_proxy
+        container-registry-url: discordtemp.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: akshomedockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: discord_notification_proxy
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+          manifests/ingress.yml
+        images: |
+          discordtemp.azurecr.io/akshome:${{ github.sha }}
+        imagepullsecrets: |
+          akshomedockerauth   
