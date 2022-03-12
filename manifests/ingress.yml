@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+    name: "akshome-f3b0"
+    labels:
+        app: "akshome-f3b0"
+    annotations:
+        kubernetes.io/ingress.class: addon-http-application-routing
+spec:
+    rules:
+        - host: discord_notification_proxy-akshome-f3b0.d461cd984b8546308849.eastus.aksapp.io
+          http:
+            paths:
+            - path: /
+              backend:
+                serviceName: "akshome-f3b0"
+                servicePort: 8080
